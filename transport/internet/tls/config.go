@@ -249,41 +249,62 @@ func (c *Config) GetTLSConfig(opts ...Option) *tls.Config {
 		newError("failed to load system root certificate").AtError().Base(err).WriteToLog()
 	}
 
-	if c == nil {
-		return &tls.Config{
-			ClientSessionCache:     globalSessionCache,
-			RootCAs:                root,
-			InsecureSkipVerify:     false,
-			NextProtos:             nil,
-			SessionTicketsDisabled: true,
-		}
-	}
-
 	config := &tls.Config{
 		ClientSessionCache:     globalSessionCache,
 		RootCAs:                root,
-		InsecureSkipVerify:     c.AllowInsecure,
-		NextProtos:             c.NextProtocol,
-		SessionTicketsDisabled: !c.EnableSessionResumption,
+		SessionTicketsDisabled: c.DisableSessionResumption,
+	}
+	if c == nil {
+		return config
 	}
 
 	for _, opt := range opts {
 		opt(config)
 	}
 
+	if !c.AllowInsecureCiphers && len(config.CipherSuites) == 0 {
+		config.CipherSuites = []uint16{
+			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			tls.DISABLED_TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
+			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			tls.DISABLED_TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
+			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+			tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
+			tls.DISABLED_TLS_RSA_WITH_AES_256_CBC_SHA256,
+			tls.TLS_RSA_WITH_AES_128_CBC_SHA256,
+			tls.TLS_RSA_WITH_AES_256_CBC_SHA,
+			tls.TLS_RSA_WITH_AES_128_CBC_SHA,
+		}
+	}
+
+	config.InsecureSkipVerify = c.AllowInsecure
+	config.Certificates = c.BuildCertificates()
+	config.BuildNameToCertificate()
+
 	caCerts := c.getCustomCA()
 	if len(caCerts) > 0 {
 		config.GetCertificate = getGetCertificateFunc(config, caCerts)
-	} else {
-		config.GetCertificate = getNewGetCertficateFunc(c.BuildCertificates())
 	}
 
 	if sn := c.parseServerName(); len(sn) > 0 {
 		config.ServerName = sn
 	}
 
+	if len(c.NextProtocol) > 0 {
+		config.NextProtos = c.NextProtocol
+	}
 	if len(config.NextProtos) == 0 {
-		config.NextProtos = []string{"h2", "http/1.1"}
+		config.NextProtos = []string{"http/1.1"}
 	}
 
 	switch c.MinVersion {
